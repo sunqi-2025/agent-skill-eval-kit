@@ -1,54 +1,91 @@
 # agent-skill-eval-kit
 
 [![CI](https://github.com/sunqi-2025/agent-skill-eval-kit/actions/workflows/ci.yml/badge.svg)](https://github.com/sunqi-2025/agent-skill-eval-kit/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Python 3.9+](https://img.shields.io/badge/Python-3.9%2B-3776AB.svg)](https://www.python.org/)
 
-面向软件研发、测试与运维场景的 **Agent Skill 质量自检脚本与评测口径**。
+English | [简体中文](README.zh-CN.md)
 
-平时在本地编写、维护和评测工作流 Skill 时，经常碰到一些共性毛病：触发条件写太泛导致抢活、几千行扫描日志直接塞回对话把上下文吃满、脚本里混进硬编码密钥或 `shell=True` 拼接、或者只测正常路径不测空返回和脏数据。这个仓库把常用的静态排查项做成了一个零依赖的 Python 小工具，并附带一份可直接套用的五项实测评测表。
+A **zero-dependency Agent Skill static security & quality auditor** and **5-Gate Evaluation Rubric** designed for software engineering, QA, and DevOps AI workflows—usable both as a standalone Python CLI and directly as an installable **`SKILL.md` Agent Skill** (compatible with Claude Code, Cursor, Codex CLI, Gemini CLI, Antigravity, and Agensi.io).
 
-## 包含内容
+Most Agent Skills work fine on happy-path demos but fail in production: overly broad triggers hijack unrelated prompts, raw logs blow up the context window, or helper scripts quietly ship hardcoded credentials, `shell=True`, unsafe deserialization, SQL interpolation, or unguarded database writes. This kit encodes those checks into deterministic Python (stdlib only) plus a field-tested manual review rubric.
+
+---
+
+## Repository Layout
 
 ```text
 agent-skill-eval-kit/
-├── skill_auditor.py             # 零第三方依赖的 Skill 静态质量与安全体检 CLI
+├── SKILL.md                           # Installable Agent Skill entry (agentskills.io / Agensi spec)
+├── scripts/
+│   ├── skill_auditor.py               # Zero-dependency static quality & security auditor CLI
+│   └── package_skill.py               # Builds & self-verifies clean marketplace ZIP (dist/)
+├── skill_auditor.py                   # Backward-compatible root CLI wrapper
+├── references/
+│   └── skill-eval-rubric.md           # 5-Gate evaluation rubric & defect patterns (English)
 ├── rubrics/
-│   └── skill-eval-rubric.md     # 科技软件类 Skill 五项实测评测标准与脱敏案例
+│   └── skill-eval-rubric.md           # 5-Gate evaluation rubric (Chinese)
 ├── examples/
-│   ├── sample-bad-skill/        # 反面样例（含硬编码密钥、shell=True、SQL 拼接、日志刷屏）
-│   └── sample-good-skill/       # 规范样例（边界清晰、脚本确定性校验、有单测和脱敏护栏）
+│   ├── sample-bad-skill/              # Synthetic negative fixture (for auditor tests only)
+│   └── sample-good-skill/             # Compliant skill fixture
 └── tests/
-    └── test_skill_auditor.py    # unittest 单元测试集
+    └── test_skill_auditor.py          # Full unittest suite
 ```
 
-## 快速上手
+---
 
-需要 Python 3.9+，无需安装任何第三方包：
+## Quick Start
+
+Requires **Python 3.9+**. No `pip install` needed.
 
 ```bash
-# 检查反面样例（命中 P0 安全问题时以非零状态码退出，方便接入 CI 门禁）
-python3 skill_auditor.py examples/sample-bad-skill
+# Audit a skill directory (exits non-zero on P0 security issues)
+python3 scripts/skill_auditor.py examples/sample-bad-skill
 
-# 检查规范样例
-python3 skill_auditor.py examples/sample-good-skill
+# Enforce strict Agent Skills spec compliance (directory name == frontmatter name, P0 + P1 gate)
+python3 scripts/skill_auditor.py . --spec --strict
 
-# 输出 JSON 报告供脚本二次消费
-python3 skill_auditor.py examples/sample-bad-skill --format json
+# Output JSON for CI/CD pipelines
+python3 scripts/skill_auditor.py examples/sample-good-skill --format json
 
-# 运行单元测试
+# Write full report to disk and print a concise 1-line summary (Gate G3)
+python3 scripts/skill_auditor.py examples/sample-bad-skill --output /tmp/skill-audit.md
+
+# Switch report output to Chinese
+python3 scripts/skill_auditor.py examples/sample-bad-skill --lang zh
+
+# Run all unit tests
 python3 -m unittest discover -s tests -v
 ```
 
-## 内置检查项
+> Backward compatibility: `python3 skill_auditor.py <target>` at the repo root remains fully supported.
 
-| 类别 | 级别 | 检查内容 |
-| :--- | :--- | :--- |
-| 触发与文档规范 | P1 / P2 | `SKILL.md` 是否存在、YAML frontmatter 的 `name`/`description` 是否完整、是否存在过宽触发词、正文是否过长挤占上下文 |
-| 硬编码凭据 | P0 | 脚本或文档中是否出现疑似 API Key、Token、私钥头或明文密码赋值 |
-| 高危命令与注入 | P0 | `subprocess(..., shell=True)`、`os.system`、`eval`/`exec`、危险删除命令，以及字符串拼接的 SQL / `${}` 模板变量 |
-| 写操作防误写护栏 | P1 | 出现数据库 `UPDATE`/`DELETE`/`DROP` 时是否带有只读或环境保护校验 |
-| 长日志上下文治理 | P2 | 是否存在直接整块打印大文件/长日志输出而未做截断或落盘提示 |
-| 异常与单测覆盖 | P2 | 是否配有 `tests/` 目录验证边界和异常输入 |
+---
 
-## 评测口径参考
+## Built-in Static Rules
 
-完整的人工实测评测清单与 4 个脱敏评审样例见 [rubrics/skill-eval-rubric.md](rubrics/skill-eval-rubric.md)。
+| Gate | Severity | Rule IDs | What It Checks |
+| :--- | :--- | :--- | :--- |
+| **G1 Trigger & Spec Hygiene** | P1 / P2 | `G1-MISSING-SKILL-MD`, `G1-MISSING-FRONTMATTER`, `G1-EMPTY-NAME`, `G1-INVALID-NAME-FORMAT`, `G1-NAME-DIR-MISMATCH`, `G1-SHORT-DESCRIPTION`, `G1-DESCRIPTION-TOO-LONG`, `G1-BROAD-TRIGGER` | Validates `SKILL.md` presence, YAML frontmatter, Agent Skills spec naming (`a-z0-9-`, 1–64 chars), description length (20–1024 chars), directory-name match (`--spec`), and overly broad trigger phrases. |
+| **G3 Context Budget** | P2 | `G3-OVERSIZED-SKILL-MD`, `G3-UNBOUNDED-LOG-PRINT` | Flags oversized `SKILL.md` files (>350 lines by default) and unbounded `print(...read())` dumps that bloat conversation context. |
+| **G4 Security Guardrails** | P0 / P1 | `G4-PRIVATE-KEY`, `G4-HARDCODED-SECRET`, `G4-DANGEROUS-RM`, `G4-CURL-PIPE-SHELL`, `G4-DYNAMIC-EXEC`, `G4-OS-SYSTEM`, `G4-SUBPROCESS-SHELL-TRUE`, `G4-UNSAFE-DESERIALIZATION`, `G4-SQL-TEMPLATE-INJECTION`, `G4-SQL-STRING-CONCAT`, `G4-UNGUARDED-DB-WRITE`, `G4-PROMPT-OVERRIDE` | Catches private keys, hardcoded credentials (filtering safe placeholders), destructive `rm -rf`, `curl/wget \| sh`, `eval`/`exec`, `os.system`, `shell=True`, unsafe `pickle.load`/`yaml.load`, SQL interpolation (`${}` / f-strings / concat), unguarded DB writes, and prompt-override instructions in Markdown. |
+| **G5 Verification Coverage** | P2 | `G5-NO-TESTS-DIR` | Checks that the skill ships a non-empty `tests/` suite for negative-path and dirty-data regression testing. |
+
+---
+
+## Build Clean Marketplace Package (Agensi / Agent Skills ZIP)
+
+To avoid marketplace security scanners false-flagging the synthetic negative fixtures under `examples/sample-bad-skill/`, build a clean runtime `.zip` archive with:
+
+```bash
+python3 scripts/package_skill.py
+# Output: dist/agent-skill-eval-kit.zip (automatically unpacked, self-audited with --spec --strict, and smoke-tested)
+```
+
+---
+
+## 5-Gate Evaluation Rubric
+
+For manual architecture and negative-path review beyond static scanning, see:
+- English: [references/skill-eval-rubric.md](references/skill-eval-rubric.md)
+- 简体中文: [rubrics/skill-eval-rubric.md](rubrics/skill-eval-rubric.md)
